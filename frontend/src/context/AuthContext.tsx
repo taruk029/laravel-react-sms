@@ -2,6 +2,24 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import axios from 'axios';
 import API_CONFIG from '../config/api.config';
+import { encrypt, decrypt } from '../utils/crypto';
+
+// Setup Axios Interceptors
+axios.interceptors.request.use(async (config) => {
+  if (config.data && !(config.data instanceof FormData)) {
+    const encrypted = await encrypt(config.data);
+    config.data = { payload: encrypted };
+  }
+  return config;
+});
+
+axios.interceptors.response.use(async (response) => {
+  if (response.data && response.data.payload) {
+    const decrypted = await decrypt(response.data.payload);
+    response.data = decrypted;
+  }
+  return response;
+});
 
 interface User {
   id: number;
