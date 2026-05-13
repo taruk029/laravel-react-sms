@@ -19,7 +19,7 @@ class CheckRole
             return response()->json(['message' => 'Unauthenticated'], 401);
         }
 
-        if (!in_array($request->user()->role, $roles)) {
+        if (!in_array($request->user()->role->slug, $roles)) {
             return response()->json(['message' => 'Unauthorized'], 403);
         }
 

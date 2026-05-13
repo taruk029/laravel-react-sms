@@ -7,7 +7,17 @@ interface User {
   id: number;
   name: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'reseller' | 'client';
+  mobile?: string;
+  role: {
+    id: number;
+    name: string;
+    slug: 'super_admin' | 'admin' | 'reseller' | 'client';
+  };
+  profile?: {
+    country?: string;
+    address?: string;
+    image?: string;
+  };
   is_active: boolean;
 }
 
@@ -63,10 +73,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     delete axios.defaults.headers.common['Authorization'];
   };
 
-  const isSuperAdmin = user?.role === 'super_admin';
-  const isAdmin = user?.role === 'admin' || isSuperAdmin;
-  const isReseller = user?.role === 'reseller';
-  const isClient = user?.role === 'client';
+  const isSuperAdmin = user?.role?.slug === 'super_admin';
+  const isAdmin = user?.role?.slug === 'admin' || isSuperAdmin;
+  const isReseller = user?.role?.slug === 'reseller';
+  const isClient = user?.role?.slug === 'client';
 
   return (
     <AuthContext.Provider value={{ 

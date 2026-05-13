@@ -3,6 +3,7 @@
 namespace Database\Seeders;
 
 use App\Models\User;
+use App\Models\Role;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -13,12 +14,14 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        $roles = Role::pluck('id', 'slug');
+
         // Super Admin
         User::factory()->create([
             'name' => 'Super Admin',
             'email' => 'superadmin@example.com',
             'password' => Hash::make('password'),
-            'role' => User::ROLE_SUPER_ADMIN,
+            'role_id' => $roles['super_admin'],
         ]);
 
         // Admin
@@ -26,7 +29,7 @@ class DatabaseSeeder extends Seeder
             'name' => 'Admin User',
             'email' => 'admin@example.com',
             'password' => Hash::make('password'),
-            'role' => User::ROLE_ADMIN,
+            'role_id' => $roles['admin'],
         ]);
 
         // Reseller
@@ -34,18 +37,20 @@ class DatabaseSeeder extends Seeder
             'name' => 'Reseller User',
             'email' => 'reseller@example.com',
             'password' => Hash::make('password'),
-            'role' => User::ROLE_RESELLER,
+            'role_id' => $roles['reseller'],
         ]);
 
         // Reseller Clients
         User::factory(5)->create([
-            'role' => User::ROLE_CLIENT,
+            'role_id' => $roles['client'],
             'parent_id' => $reseller->id,
         ]);
 
-        // Normal Clients (No parent)
+        // Normal Clients (No parent - though the new rule says they should have one)
+        // For seeding purposes, we might still want some "orphan" clients or just assign them to the reseller
         User::factory(5)->create([
-            'role' => User::ROLE_CLIENT,
+            'role_id' => $roles['client'],
+            'parent_id' => $reseller->id,
         ]);
     }
 }

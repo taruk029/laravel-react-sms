@@ -27,9 +27,10 @@ class User extends Authenticatable
     protected $fillable = [
         'name',
         'email',
+        'mobile',
         'password',
         'is_active',
-        'role',
+        'role_id',
         'parent_id',
     ];
 
@@ -57,24 +58,44 @@ class User extends Authenticatable
         ];
     }
 
+    /**
+     * Scope a query to exclude super admins.
+     */
+    public function scopeExcludeSuperAdmin($query)
+    {
+        return $query->whereHas('role', function($q) {
+            $q->where('slug', '!=', self::ROLE_SUPER_ADMIN);
+        });
+    }
+
+    public function role()
+    {
+        return $this->belongsTo(Role::class);
+    }
+
+    public function profile()
+    {
+        return $this->hasOne(UserProfile::class);
+    }
+
     public function isSuperAdmin()
     {
-        return $this->role === self::ROLE_SUPER_ADMIN;
+        return $this->role && $this->role->slug === self::ROLE_SUPER_ADMIN;
     }
 
     public function isAdmin()
     {
-        return $this->role === self::ROLE_ADMIN;
+        return $this->role && $this->role->slug === self::ROLE_ADMIN;
     }
 
     public function isReseller()
     {
-        return $this->role === self::ROLE_RESELLER;
+        return $this->role && $this->role->slug === self::ROLE_RESELLER;
     }
 
     public function isClient()
     {
-        return $this->role === self::ROLE_CLIENT;
+        return $this->role && $this->role->slug === self::ROLE_CLIENT;
     }
 
     public function parent()
@@ -85,5 +106,21 @@ class User extends Authenticatable
     public function children()
     {
         return $this->hasMany(User::class, 'parent_id');
+    }
+
+    /**
+     * Get all ancestors of the user recursively.
+     */
+    public function getAllAncestors()
+    {
+        $ancestors = collect();
+        $parent = $this->parent;
+
+        while ($parent) {
+            $ancestors->push($parent);
+            $parent = $parent->parent;
+        }
+
+        return $ancestors;
     }
 }

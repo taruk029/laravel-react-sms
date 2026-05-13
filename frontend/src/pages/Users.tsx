@@ -1,15 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import API_CONFIG from '../config/api.config';
-import { User as UserIcon, Mail, Calendar, Edit2, Shield, ShieldOff, Loader2, ChevronLeft, ChevronRight, X, UserPlus, Tag } from 'lucide-react';
+import { Mail, Edit2, Shield, ShieldOff, Loader2, ChevronLeft, ChevronRight, X, UserPlus, Tag } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 interface User {
   id: number;
   name: string;
   email: string;
-  role: 'super_admin' | 'admin' | 'reseller' | 'client';
+  mobile?: string;
+  role: {
+    id: number;
+    name: string;
+    slug: 'super_admin' | 'admin' | 'reseller' | 'client';
+  };
+  profile?: {
+    country?: string;
+    address?: string;
+    image?: string;
+  };
   is_active: boolean;
+  parent?: {
+    id: number;
+    name: string;
+    role: {
+      name: string;
+      slug: string;
+    };
+  };
   created_at: string;
 }
 
@@ -25,14 +43,33 @@ interface PaginationData {
 const UserList: React.FC = () => {
   const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
+  const [resellers, setResellers] = useState<User[]>([]);
   const [pagination, setPagination] = useState<PaginationData | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isAddingUser, setIsAddingUser] = useState(false);
   const [updateLoading, setUpdateLoading] = useState(false);
   const [addLoading, setAddLoading] = useState(false);
-  const [editForm, setEditForm] = useState({ name: '', email: '', role: '' });
-  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', role: 'client' });
+  const [editForm, setEditForm] = useState({ 
+    name: '', 
+    email: '', 
+    mobile: '',
+    role_slug: '',
+    country: '',
+    address: '',
+    image: null as File | null
+  });
+  const [addForm, setAddForm] = useState({ 
+    name: '', 
+    email: '', 
+    mobile: '',
+    password: '', 
+    role_slug: 'client', 
+    parent_id: '',
+    country: '',
+    address: '',
+    image: null as File | null
+  });
   const [error, setError] = useState('');
 
   const fetchUsers = async (page = 1) => {
@@ -48,9 +85,31 @@ const UserList: React.FC = () => {
     }
   };
 
+  // Fetch resellers for the dropdown when an Admin wants to create a client (if allowed)
+  // or just to have them handy.
+  const fetchResellers = async () => {
+    try {
+      // This is a bit of a hack, ideally we'd have a specific endpoint for "list-available-parents"
+      const response = await axios.get(`${API_CONFIG.baseUrl}/users?role=reseller`);
+      setResellers(response.data.data.filter((u: User) => u.role?.slug === 'reseller'));
+    } catch (err) {
+      console.error('Failed to fetch resellers', err);
+    }
+  };
+
   useEffect(() => {
     fetchUsers();
-  }, []);
+    if (currentUser?.role?.slug === 'admin' || currentUser?.role?.slug === 'super_admin') {
+      fetchResellers();
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    // Set default role based on current user's role
+    if (currentUser?.role?.slug === 'super_admin') setAddForm(f => ({ ...f, role_slug: 'admin' }));
+    else if (currentUser?.role?.slug === 'admin') setAddForm(f => ({ ...f, role_slug: 'reseller' }));
+    else if (currentUser?.role?.slug === 'reseller') setAddForm(f => ({ ...f, role_slug: 'client' }));
+  }, [isAddingUser, currentUser]);
 
   const handleToggleStatus = async (user: User) => {
     try {
@@ -63,7 +122,15 @@ const UserList: React.FC = () => {
 
   const handleEditClick = (user: User) => {
     setEditingUser(user);
-    setEditForm({ name: user.name, email: user.email, role: user.role });
+    setEditForm({ 
+      name: user.name, 
+      email: user.email, 
+      mobile: user.mobile || '',
+      role_slug: user.role?.slug || 'client',
+      country: user.profile?.country || '',
+      address: user.profile?.address || '',
+      image: null
+    });
     setError('');
   };
 
@@ -74,7 +141,21 @@ const UserList: React.FC = () => {
     setUpdateLoading(true);
     setError('');
     try {
-      const response = await axios.put(`${API_CONFIG.baseUrl}/users/${editingUser.id}`, editForm);
+      const formData = new FormData();
+      formData.append('_method', 'PUT'); // Laravel handles PUT with FormData via _method
+      formData.append('name', editForm.name);
+      formData.append('email', editForm.email);
+      formData.append('mobile', editForm.mobile);
+      formData.append('role_slug', editForm.role_slug);
+      formData.append('country', editForm.country);
+      formData.append('address', editForm.address);
+      if (editForm.image) {
+        formData.append('image', editForm.image);
+      }
+
+      const response = await axios.post(`${API_CONFIG.baseUrl}/users/${editingUser.id}`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
       setUsers(users.map(u => u.id === editingUser.id ? response.data.user : u));
       setEditingUser(null);
     } catch (err: any) {
@@ -89,10 +170,40 @@ const UserList: React.FC = () => {
     setAddLoading(true);
     setError('');
     try {
-      const response = await axios.post(`${API_CONFIG.baseUrl}/users`, addForm);
+      const formData = new FormData();
+      formData.append('name', addForm.name);
+      formData.append('email', addForm.email);
+      formData.append('mobile', addForm.mobile);
+      formData.append('password', addForm.password);
+      formData.append('role_slug', addForm.role_slug);
+      
+      // Only append parent_id if it's not empty, to avoid 422 validation errors in Laravel
+      if (addForm.parent_id) {
+        formData.append('parent_id', addForm.parent_id);
+      }
+      
+      formData.append('country', addForm.country);
+      formData.append('address', addForm.address);
+      if (addForm.image) {
+        formData.append('image', addForm.image);
+      }
+
+      const response = await axios.post(`${API_CONFIG.baseUrl}/users`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+      });
       setUsers([response.data.user, ...users]);
       setIsAddingUser(false);
-      setAddForm({ name: '', email: '', password: '', role: 'client' });
+      setAddForm({ 
+        name: '', 
+        email: '', 
+        mobile: '',
+        password: '', 
+        role_slug: 'client', 
+        parent_id: '',
+        country: '',
+        address: '',
+        image: null
+      });
     } catch (err: any) {
       setError(err.response?.data?.message || 'Failed to add user');
     } finally {
@@ -100,8 +211,9 @@ const UserList: React.FC = () => {
     }
   };
 
-  const getRoleBadge = (role: string) => {
-    switch (role) {
+  const getRoleBadge = (role?: { slug: string }) => {
+    if (!role) return 'bg-gray-100 text-gray-800';
+    switch (role.slug) {
       case 'super_admin': return 'bg-purple-100 text-purple-800';
       case 'admin': return 'bg-blue-100 text-blue-800';
       case 'reseller': return 'bg-orange-100 text-orange-800';
@@ -130,6 +242,8 @@ const UserList: React.FC = () => {
                 <tr>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">User</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Mobile</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Managed By</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Created At</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -138,7 +252,7 @@ const UserList: React.FC = () => {
               <tbody className="bg-white divide-y divide-gray-200">
                 {loading ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center">
+                    <td colSpan={7} className="px-6 py-12 text-center">
                       <Loader2 className="w-8 h-8 animate-spin mx-auto text-blue-500" />
                     </td>
                   </tr>
@@ -147,8 +261,10 @@ const UserList: React.FC = () => {
                     <tr key={user.id} className="hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
-                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border-2 border-white shadow-sm">
-                            {user.name.charAt(0)}
+                          <div className="h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold border-2 border-white shadow-sm overflow-hidden">
+                            {user.profile?.image ? (
+                              <img src={`${API_CONFIG.baseUrl.replace('/api', '')}/storage/${user.profile.image}`} alt="" className="h-full w-full object-cover" />
+                            ) : user.name.charAt(0)}
                           </div>
                           <div className="ml-4">
                             <div className="text-sm font-semibold text-gray-900">{user.name}</div>
@@ -162,8 +278,21 @@ const UserList: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`px-2.5 py-0.5 inline-flex text-xs leading-5 font-medium rounded-full ${getRoleBadge(user.role)}`}>
                           <Tag className="w-3 h-3 mr-1 self-center" />
-                          {user.role.replace('_', ' ')}
+                          {user.role?.name || 'Client'}
                         </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {user.mobile || '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        {user.parent ? (
+                          <div className="text-sm text-gray-900 flex flex-col">
+                            <span className="font-medium">{user.parent.name}</span>
+                            <span className="text-xs text-gray-500 capitalize">{user.parent.role?.name || 'User'}</span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">No Parent</span>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(user.created_at).toLocaleDateString()}
@@ -286,17 +415,75 @@ const UserList: React.FC = () => {
                       className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                     />
                   </div>
-                  {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Mobile</label>
+                    <input
+                      type="text"
+                      value={addForm.mobile}
+                      onChange={(e) => setAddForm({ ...addForm, mobile: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                    <input
+                      type="text"
+                      value={addForm.country}
+                      onChange={(e) => setAddForm({ ...addForm, country: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <textarea
+                      value={addForm.address}
+                      onChange={(e) => setAddForm({ ...addForm, address: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Profile Image</label>
+                    <input
+                      type="file"
+                      onChange={(e) => setAddForm({ ...addForm, image: e.target.files?.[0] || null })}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
+                  {(currentUser?.role?.slug === 'super_admin' || currentUser?.role?.slug === 'admin' || currentUser?.role?.slug === 'reseller') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                       <select
-                        value={addForm.role}
-                        onChange={(e) => setAddForm({ ...addForm, role: e.target.value })}
+                        value={addForm.role_slug}
+                        onChange={(e) => setAddForm({ ...addForm, role_slug: e.target.value as any })}
                         className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                       >
-                        <option value="client">Client</option>
-                        <option value="reseller">Reseller</option>
-                        <option value="admin">Admin</option>
+                        {currentUser?.role?.slug === 'super_admin' && (
+                          <>
+                            <option value="admin">Admin</option>
+                            <option value="reseller">Reseller</option>
+                          </>
+                        )}
+                        {currentUser?.role?.slug === 'admin' && <option value="reseller">Reseller</option>}
+                        {currentUser?.role?.slug === 'admin' && <option value="client">Client</option>}
+                        {currentUser?.role?.slug === 'reseller' && <option value="client">Client</option>}
+                      </select>
+                    </div>
+                  )}
+
+                  {addForm.role_slug === 'client' && currentUser?.role?.slug === 'admin' && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Assign to Reseller</label>
+                      <select
+                        required
+                        value={addForm.parent_id}
+                        onChange={(e) => setAddForm({ ...addForm, parent_id: e.target.value })}
+                        className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      >
+                        <option value="">Select a Reseller</option>
+                        {resellers.map(reseller => (
+                          <option key={reseller.id} value={reseller.id}>{reseller.name} ({reseller.email})</option>
+                        ))}
                       </select>
                     </div>
                   )}
@@ -357,18 +544,53 @@ const UserList: React.FC = () => {
                       className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                     />
                   </div>
-                  {(currentUser?.role === 'super_admin' || currentUser?.role === 'admin') && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Mobile</label>
+                    <input
+                      type="text"
+                      value={editForm.mobile}
+                      onChange={(e) => setEditForm({ ...editForm, mobile: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Country</label>
+                    <input
+                      type="text"
+                      value={editForm.country}
+                      onChange={(e) => setEditForm({ ...editForm, country: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Address</label>
+                    <textarea
+                      value={editForm.address}
+                      onChange={(e) => setEditForm({ ...editForm, address: e.target.value })}
+                      className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Profile Image</label>
+                    <input
+                      type="file"
+                      onChange={(e) => setEditForm({ ...editForm, image: e.target.files?.[0] || null })}
+                      className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                  </div>
+                  {(currentUser?.role?.slug === 'super_admin' || currentUser?.role?.slug === 'admin') && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Role</label>
                       <select
-                        value={editForm.role}
-                        onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
+                        value={editForm.role_slug}
+                        onChange={(e) => setEditForm({ ...editForm, role_slug: e.target.value })}
                         className="block w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                       >
                         <option value="client">Client</option>
                         <option value="reseller">Reseller</option>
                         <option value="admin">Admin</option>
-                        <option value="super_admin">Super Admin</option>
+                        {currentUser?.role?.slug === 'super_admin' && <option value="super_admin">Super Admin</option>}
                       </select>
                     </div>
                   )}

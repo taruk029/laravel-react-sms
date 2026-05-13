@@ -17,7 +17,7 @@ const DashboardLayout: React.FC = () => {
   ];
 
   const filteredMenuItems = menuItems.filter(item => 
-    !item.roles || (user && item.roles.includes(user.role))
+    !item.roles || (user && item.roles.includes(user.role.slug))
   );
 
   const isActive = (path: string) => location.pathname === path;
